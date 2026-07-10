@@ -79,3 +79,19 @@ describe('Account', () => {
   });
 
 });
+
+describe('fetchSubcategories', () => {
+  it('unwraps subcategories and hits sub-categories', async () => {
+    const client = new ListingsAPI({ apiKey: 'test-key' });
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ data: { subcategories: [{ databaseId: 639, name: 'Dentist' }] } }),
+      text: async () => '{}',
+    } as unknown as Response);
+    const subs = await client.fetchSubcategories();
+    expect(subs[0].databaseId).toBe(639);
+    expect(spy.mock.calls[0][0]).toContain('/api/v4/sub-categories');
+  });
+});

@@ -32,5 +32,14 @@ export function createAccountMethods(http: HttpCore) {
       return (data as any)?.data?.activeSubscriptions ?? [];
     },
 
+    /**
+     * Get business subcategories. Use the databaseId as subCategoryId when
+     * creating locations.
+     */
+    async fetchSubcategories(): Promise<any[]> {
+      const data = await http.apiGet('sub-categories');
+      return (data as any)?.data?.subcategories ?? [];
+    },
+
   };
 }
