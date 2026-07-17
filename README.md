@@ -1,8 +1,16 @@
-# listingsAPI Node.js SDK
+<p align="center">
+  <img src="assets/listingsapi-logo.svg" alt="listingsAPI" width="104" height="104" />
+</p>
 
-[![npm](https://img.shields.io/npm/v/listingsapi-js)](https://www.npmjs.com/package/listingsapi-js)
-[![Node](https://img.shields.io/badge/node-18%2B-blue)](https://www.npmjs.com/package/listingsapi-js)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<h1 align="center">listingsAPI Node.js SDK</h1>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/listingsapi-js"><img src="https://img.shields.io/npm/v/listingsapi-js?color=2C6BE0" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/listingsapi-js"><img src="https://img.shields.io/npm/dm/listingsapi-js?color=5BB0FF" alt="npm downloads" /></a>
+  <a href="https://www.npmjs.com/package/listingsapi-js"><img src="https://img.shields.io/badge/node-18%2B-2C6BE0" alt="Node 18+" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" /></a>
+  <a href="https://www.listingsapi.com"><img src="https://img.shields.io/badge/Visit-listingsapi.com-2C6BE0" alt="Website" /></a>
+</p>
 
 The official Node.js SDK for [listingsAPI](https://www.listingsapi.com): business listings, reviews, posts, and analytics for local marketing, in one typed client.
 
@@ -443,7 +451,7 @@ import type { BulkPublishOptions, Location, PageInfo } from 'listingsapi-js';
 ## Development
 
 ```bash
-git clone https://github.com/synup/listingsapi-nodejs-sdk.git
+git clone https://github.com/listings-api/listingsapi-nodejs-sdk.git
 cd listingsapi-nodejs-sdk
 npm install
 npm test          # vitest, fully offline

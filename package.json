@@ -50,7 +50,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/synup/listingsapi-nodejs-sdk.git"
+    "url": "git+https://github.com/listings-api/listingsapi-nodejs-sdk.git"
   },
   "homepage": "https://docs.listingsapi.com/sdks/node",
   "author": "listingsAPI <support@listingsapi.com>"
