@@ -1,6 +1,6 @@
 {
   "name": "listingsapi-js",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Node.js SDK for listingsAPI — listings, reviews, posts, and analytics for local marketing",
   "type": "module",
   "main": "./dist/index.cjs",
