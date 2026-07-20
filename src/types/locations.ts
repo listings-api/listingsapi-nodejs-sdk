@@ -1,3 +1,5 @@
+import type { PageInfo } from './common.js';
+
 export interface Location {
   id: string;
   name?: string;
@@ -44,4 +46,15 @@ export interface UpdateLocationInput {
   ownerEmail?: string;
   ownerName?: string;
   [key: string]: any;
+}
+
+/**
+ * A single page of locations, returned by `fetchAllLocations` and
+ * `searchLocations` when `fetchAll` is not set to `true`.
+ */
+export interface LocationPaginatedResponse {
+  success: boolean;
+  locations: Location[];
+  pageInfo: PageInfo;
+  raw: any;
 }

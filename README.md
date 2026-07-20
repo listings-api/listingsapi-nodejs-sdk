@@ -98,7 +98,7 @@ await client.respondToReview('interaction-uuid', 'Thank you!');
 ```ts
 // List, search, and fetch
 const page = await client.fetchAllLocations({ first: 25 });
-const next = await client.fetchAllLocations({ first: 25, after: page.pageInfo.endCursor });
+const next = await client.fetchAllLocations({ first: 25, after: page.pageInfo.endCursor ?? undefined });
 const results = await client.searchLocations('cafe', { first: 20 });
 const byIds = await client.fetchLocationsByIds([16808, 16749]);
 const byCodes = await client.fetchLocationsByStoreCodes(['STORE01', 'STORE02']);
@@ -111,9 +111,11 @@ const created = await client.createLocation({
   subCategoryId: 1432,
   countryIso: 'US',
   city: 'New York',
+  stateIso: 'NY',
   street: '123 Jump Street',
   postalCode: '10013',
   phone: '6443859313',
+  storeId: 'ACME-NYC-01',
 });
 
 // Update and lifecycle
@@ -201,7 +203,7 @@ await client.archiveReviewResponse('response-id');
 const overview = await client.fetchReviewAnalyticsOverview(16808, { startDate: '2024-01-01' });
 const timeline = await client.fetchReviewAnalyticsTimeline(16808);
 const sites = await client.fetchReviewAnalyticsSitesStats(16808);
-const phrases = await client.fetchReviewPhrases(['TG9jYXRpb246MTY4MDg='], { startDate: '2024-01-01' });
+const phrases = await client.fetchReviewPhrases({ locationIds: ['TG9jYXRpb246MTY4MDg='], startDate: '2024-01-01' });
 ```
 
 ## Listings
@@ -308,7 +310,7 @@ const cats = await client.fetchSubcategories();    // category IDs for createLoc
 | `fetchReviewSettings(locationId)` | Review notification settings |
 | `editReviewSettings(locationId, siteUrls)` | Update notification settings |
 | `fetchReviewSiteConfig()` | Review site configuration for the account |
-| `fetchReviewPhrases(locationIds, opts)` | Frequently used phrases across reviews |
+| `fetchReviewPhrases(opts)` | Frequently used phrases across reviews (`opts.locationIds` required) |
 | `fetchReviewAnalyticsOverview(locationId, opts)` | Review analytics overview |
 | `fetchReviewAnalyticsTimeline(locationId, opts)` | Review volume/rating over time |
 | `fetchReviewAnalyticsSitesStats(locationId, opts)` | Per-site review stats |
@@ -445,7 +447,30 @@ const client = new ListingsAPI({
 Types are bundled; no separate `@types/` package is needed. All option and response types are exported:
 
 ```ts
-import type { BulkPublishOptions, Location, PageInfo } from 'listingsapi-js';
+import type {
+  BulkPublishOptions,
+  Location,
+  LocationPaginatedResponse,
+  InteractionResponse,
+  PageInfo,
+} from 'listingsapi-js';
+```
+
+`fetchAllLocations`, `searchLocations`, and `fetchInteractions` are overloaded on the `fetchAll` flag, so the return type resolves at compile time — no cast needed:
+
+```ts
+const page = await client.fetchAllLocations({ first: 25 }); // LocationPaginatedResponse
+page.locations; page.pageInfo.endCursor;
+
+const all = await client.fetchAllLocations({ fetchAll: true }); // Location[]
+all.length;
+```
+
+If you pass an options object whose `fetchAll` is a plain `boolean` (not a literal `true`/`false`), the return type stays the union and you narrow it yourself:
+
+```ts
+const result = await client.fetchAllLocations(opts); // LocationPaginatedResponse | Location[]
+const locations = Array.isArray(result) ? result : result.locations;
 ```
 
 ## Development

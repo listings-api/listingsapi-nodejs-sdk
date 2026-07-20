@@ -79,24 +79,38 @@ export function createReviewMethods(http: HttpCore) {
     return allNodes;
   }
 
+  /**
+   * Get reviews/interactions for a location with pagination and filters.
+   * When fetchAll is true, returns a flat array of all interactions.
+   * Otherwise returns a paginated response object.
+   */
+  function fetchInteractions(
+    locationId: string | number,
+    options: PaginationOptions & InteractionFilters & { fetchAll: true },
+  ): Promise<Interaction[]>;
+  function fetchInteractions(
+    locationId: string | number,
+    options?: PaginationOptions & InteractionFilters & { fetchAll?: false },
+  ): Promise<InteractionResponse>;
+  function fetchInteractions(
+    locationId: string | number,
+    options?: PaginationOptions & InteractionFilters,
+  ): Promise<InteractionResponse | Interaction[]>;
+  async function fetchInteractions(
+    locationId: string | number,
+    options: PaginationOptions & InteractionFilters = {},
+  ): Promise<InteractionResponse | Interaction[]> {
+    if (options.fetchAll) {
+      return fetchAllInteractions(locationId, {
+        ...options,
+        pageSize: options.pageSize,
+      });
+    }
+    return fetchInteractionsPage(locationId, options);
+  }
+
   return {
-    /**
-     * Get reviews/interactions for a location with pagination and filters.
-     * When fetchAll is true, returns a flat array of all interactions.
-     * Otherwise returns a paginated response object.
-     */
-    async fetchInteractions(
-      locationId: string | number,
-      options: PaginationOptions & InteractionFilters = {},
-    ): Promise<InteractionResponse | Interaction[]> {
-      if (options.fetchAll) {
-        return fetchAllInteractions(locationId, {
-          ...options,
-          pageSize: options.pageSize,
-        });
-      }
-      return fetchInteractionsPage(locationId, options);
-    },
+    fetchInteractions,
 
     /**
      * Get review source settings for a location.

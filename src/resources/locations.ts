@@ -1,12 +1,10 @@
 import type { HttpCore, PageInfo, PaginationOptions } from '../types/common.js';
-import type { Location, CreateLocationInput, UpdateLocationInput } from '../types/locations.js';
-
-export interface LocationPaginatedResponse {
-  success: boolean;
-  locations: Location[];
-  pageInfo: PageInfo;
-  raw: any;
-}
+import type {
+  Location,
+  CreateLocationInput,
+  UpdateLocationInput,
+  LocationPaginatedResponse,
+} from '../types/locations.js';
 
 export function createLocationMethods(http: HttpCore) {
   /**
@@ -82,21 +80,104 @@ export function createLocationMethods(http: HttpCore) {
     return allNodes;
   }
 
-  return {
-    /**
-     * Get locations for the account, with optional pagination or fetch-all.
-     *
-     * When fetchAll is true, returns a flat array of all locations.
-     * Otherwise returns a paginated response with locations, pageInfo, and raw data.
-     */
-    async fetchAllLocations(
-      options?: PaginationOptions,
-    ): Promise<LocationPaginatedResponse | Location[]> {
-      if (options?.fetchAll) {
-        return fetchAllLocationsPaginated(options.pageSize ?? 100);
+  /**
+   * Get locations for the account, with optional pagination or fetch-all.
+   *
+   * When fetchAll is true, returns a flat array of all locations.
+   * Otherwise returns a paginated response with locations, pageInfo, and raw data.
+   */
+  function fetchAllLocations(
+    options: PaginationOptions & { fetchAll: true },
+  ): Promise<Location[]>;
+  function fetchAllLocations(
+    options?: PaginationOptions & { fetchAll?: false },
+  ): Promise<LocationPaginatedResponse>;
+  function fetchAllLocations(
+    options?: PaginationOptions,
+  ): Promise<LocationPaginatedResponse | Location[]>;
+  async function fetchAllLocations(
+    options?: PaginationOptions,
+  ): Promise<LocationPaginatedResponse | Location[]> {
+    if (options?.fetchAll) {
+      return fetchAllLocationsPaginated(options.pageSize ?? 100);
+    }
+    return fetchLocationsPage(options);
+  }
+
+  /**
+   * Search locations by keyword (name, address, or store ID).
+   *
+   * When fetchAll is true, returns a flat array of all matches.
+   * Otherwise returns a paginated response with locations, pageInfo, and raw data.
+   */
+  function searchLocations(
+    query: string,
+    options: PaginationOptions & { fields?: string[]; fetchAll: true },
+  ): Promise<Location[]>;
+  function searchLocations(
+    query: string,
+    options?: PaginationOptions & { fields?: string[]; fetchAll?: false },
+  ): Promise<LocationPaginatedResponse>;
+  function searchLocations(
+    query: string,
+    options?: PaginationOptions & { fields?: string[] },
+  ): Promise<LocationPaginatedResponse | Location[]>;
+  async function searchLocations(
+    query: string,
+    options?: PaginationOptions & { fields?: string[] },
+  ): Promise<LocationPaginatedResponse | Location[]> {
+    if (options?.fetchAll) {
+      const allNodes: Location[] = [];
+      let after: string | undefined;
+      const pageSize = options.pageSize ?? 100;
+
+      while (true) {
+        const params: Record<string, any> = {
+          query,
+          first: pageSize,
+          ...paginationParams({ after }),
+        };
+        if (options.fields) {
+          params.fields = JSON.stringify(options.fields);
+        }
+
+        const data = await http.apiGet('locations/search', params);
+        const searchResult = data?.data?.searchLocations ?? {};
+        const { locations, pageInfo } = parsePaginatedLocations(searchResult);
+        allNodes.push(...locations);
+
+        if (!pageInfo.hasNextPage) break;
+        after = pageInfo.endCursor ?? undefined;
+        if (!after) break;
       }
-      return fetchLocationsPage(options);
-    },
+
+      return allNodes;
+    }
+
+    const params: Record<string, any> = {
+      query,
+      ...paginationParams(options),
+    };
+    if (options?.fields) {
+      params.fields = JSON.stringify(options.fields);
+    }
+
+    const data = await http.apiGet('locations/search', params);
+    const searchResult = data?.data?.searchLocations ?? {};
+    const { locations, pageInfo } = parsePaginatedLocations(searchResult);
+
+    return {
+      success: true,
+      locations,
+      pageInfo,
+      raw: data,
+    };
+  }
+
+  return {
+    fetchAllLocations,
+
+    searchLocations,
 
     /**
      * Get locations by a list of IDs. Accepts numeric or base64-encoded IDs.
@@ -123,61 +204,6 @@ export function createLocationMethods(http: HttpCore) {
         storeCodes: JSON.stringify(storeCodes),
       });
       return data?.data?.getLocationsByStoreCodes ?? [];
-    },
-
-    /**
-     * Search locations by keyword (name, address, or store ID).
-     */
-    async searchLocations(
-      query: string,
-      options?: PaginationOptions & { fields?: string[] },
-    ): Promise<LocationPaginatedResponse | Location[]> {
-      if (options?.fetchAll) {
-        const allNodes: Location[] = [];
-        let after: string | undefined;
-        const pageSize = options.pageSize ?? 100;
-
-        while (true) {
-          const params: Record<string, any> = {
-            query,
-            first: pageSize,
-            ...paginationParams({ after }),
-          };
-          if (options.fields) {
-            params.fields = JSON.stringify(options.fields);
-          }
-
-          const data = await http.apiGet('locations/search', params);
-          const searchResult = data?.data?.searchLocations ?? {};
-          const { locations, pageInfo } = parsePaginatedLocations(searchResult);
-          allNodes.push(...locations);
-
-          if (!pageInfo.hasNextPage) break;
-          after = pageInfo.endCursor ?? undefined;
-          if (!after) break;
-        }
-
-        return allNodes;
-      }
-
-      const params: Record<string, any> = {
-        query,
-        ...paginationParams(options),
-      };
-      if (options?.fields) {
-        params.fields = JSON.stringify(options.fields);
-      }
-
-      const data = await http.apiGet('locations/search', params);
-      const searchResult = data?.data?.searchLocations ?? {};
-      const { locations, pageInfo } = parsePaginatedLocations(searchResult);
-
-      return {
-        success: true,
-        locations,
-        pageInfo,
-        raw: data,
-      };
     },
 
     /**
