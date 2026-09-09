@@ -422,7 +422,9 @@ try {
 }
 ```
 
-The client automatically retries 429 and 5xx responses (default 2 attempts, honoring `Retry-After`). A `RateLimitError` means retries were exhausted; back off for `err.retryAfter` seconds before trying again.
+The client automatically retries 429 and 5xx responses on reads (default 2 attempts, honoring `Retry-After`). A `RateLimitError` means retries were exhausted; back off for `err.retryAfter` seconds before trying again.
+
+Writes are never retried automatically. The API has no idempotency keys, so a retried POST that had actually succeeded could publish a duplicate post or create a duplicate location — a failed write is surfaced to you immediately, and it is up to you to retry it when a duplicate is acceptable or detectable.
 
 ## Configuration
 
@@ -440,7 +442,7 @@ const client = new ListingsAPI({
 | `apiKey` | `LISTINGSAPI_KEY` env var | Your API key |
 | `baseUrl` | `https://listingsapi.com` | API host |
 | `timeout` | `240000` | Per-request timeout in milliseconds |
-| `maxRetries` | `2` | Automatic retries on 429 and 5xx |
+| `maxRetries` | `2` | Automatic retries on 429 and 5xx (reads only) |
 
 ## TypeScript
 

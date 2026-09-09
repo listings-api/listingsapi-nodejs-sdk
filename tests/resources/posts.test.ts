@@ -24,7 +24,7 @@ const CREATE_POST_OK = {
 
 const BULK_POST_OK = {
   data: {
-    createBulkSocialPost: {
+    createSocialPost: {
       success: true,
       errors: [],
       socialPost: { id: 'QnVsa1Bvc3Q6OTk=', status: 'INPROGRESS' },
@@ -41,7 +41,7 @@ describe('Posts', () => {
   });
 
   describe('createAnnouncement', () => {
-    it('builds a flat body with per-site entries', async () => {
+    it('wraps the body in input with per-site entries', async () => {
       const spy = mockFetch(CREATE_POST_OK);
       const result = await client.createAnnouncement({
         name: 'Grand Opening',
@@ -53,8 +53,9 @@ describe('Posts', () => {
         mediaUrl: 'https://cdn.example.com/opening.jpg',
       });
       expect(result.success).toBe(true);
-      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string);
-      expect(sent.input).toBeUndefined();
+      const envelope = JSON.parse(spy.mock.calls[0][1]!.body as string);
+      expect(Object.keys(envelope)).toEqual(['input']);
+      const sent = envelope.input;
       expect(sent.postName).toBe('Grand Opening');
       expect(sent.postType).toBe('ANNOUNCEMENT');
       expect(sent.postSites).toEqual(['GOOGLE']);
@@ -69,6 +70,22 @@ describe('Posts', () => {
     });
   });
 
+  describe('createPost', () => {
+    it('wraps a raw field object in input', async () => {
+      const spy = mockFetch(CREATE_POST_OK);
+      const result = await client.createPost({
+        postName: 'Raw',
+        locationIds: ['TG9jYXRpb246MTY4MDg='],
+        postType: 'ANNOUNCEMENT',
+        postSites: ['GOOGLE'],
+      });
+      expect(result.success).toBe(true);
+      const envelope = JSON.parse(spy.mock.calls[0][1]!.body as string);
+      expect(Object.keys(envelope)).toEqual(['input']);
+      expect(envelope.input.postName).toBe('Raw');
+    });
+  });
+
   describe('bulkPublish', () => {
     it('defaults to Google and Facebook', async () => {
       const spy = mockFetch(BULK_POST_OK);
@@ -77,9 +94,13 @@ describe('Posts', () => {
         locationIds: [16808, 'TG9jYXRpb246MTY4MDk='],
         message: 'Open late through the holidays!',
       });
+      // reads createSocialPost, not createBulkSocialPost
       expect(result.success).toBe(true);
+      expect(result.socialPost.id).toBe('QnVsa1Bvc3Q6OTk=');
       expect(spy.mock.calls[0][0]).toContain('/api/v4/bulk-posts');
-      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string);
+      const envelope = JSON.parse(spy.mock.calls[0][1]!.body as string);
+      expect(Object.keys(envelope)).toEqual(['input']);
+      const sent = envelope.input;
       expect(sent.postSites).toEqual(['GOOGLE', 'FACEBOOK']);
       expect(sent.postMessage).toHaveLength(2);
       expect(sent.locationIds[1]).toBe('TG9jYXRpb246MTY4MDk=');
@@ -92,7 +113,7 @@ describe('Posts', () => {
         locationIds: [16808],
         message: { GOOGLE: 'New summer menu!', FACEBOOK: 'Swing by for the summer menu.' },
       });
-      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string);
+      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string).input;
       const bySite = Object.fromEntries(
         sent.postMessage.map((e: any) => [e.site, e.message]),
       );
@@ -137,7 +158,7 @@ describe('Posts', () => {
     it('raises ValidationError with the platform code on API failure', async () => {
       mockFetch({
         data: {
-          createBulkSocialPost: {
+          createSocialPost: {
             success: false,
             errors: [{ code: 'SY20001', message: 'Image URL unreachable' }],
           },
@@ -180,7 +201,7 @@ describe('Posts', () => {
         startTime: '7:00pm',
         endTime: '10:00pm',
       });
-      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string);
+      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string).input;
       expect(sent.postType).toBe('EVENT');
       expect(sent.postContextInfo).toEqual({
         title: 'Jazz Night',
@@ -206,7 +227,7 @@ describe('Posts', () => {
         startDay: '2026-08-01',
         endDay: '2026-08-07',
       });
-      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string);
+      const sent = JSON.parse(spy.mock.calls[0][1]!.body as string).input;
       expect(sent.postType).toBe('OFFER');
       expect(sent.postContextInfo.couponCode).toBe('SUMMER20');
       expect(sent.postContextInfo.title).toBe('Summer Sale');
@@ -226,16 +247,34 @@ describe('Posts', () => {
       expect(post.socialPostId).toBe('bulk1');
     });
 
-    it('fetchLocationPosts defaults tag=all and encodes the location', async () => {
+    it('fetchLocationPosts sends no tag and reads postsByLocation', async () => {
       const spy = mockFetch({
-        data: { rollupSocialPosts: { records: [{ id: 'p1' }], pageInfo: { totalRecords: 1 } } },
+        data: { postsByLocation: { records: [{ id: 'p1' }], pageInfo: { totalRecords: 1 } } },
       });
       const result = await client.fetchLocationPosts(16808, { page: 1, perPage: 10 });
       expect(result.records[0].id).toBe('p1');
       const url = spy.mock.calls[0][0] as string;
       expect(url).toContain('/locations/TG9jYXRpb246MTY4MDg=/posts');
-      expect(url).toContain('tag=all');
+      // the route raises when a tag is supplied
+      expect(url).not.toContain('tag=');
       expect(url).toContain('page=1');
+    });
+
+    it('fetchLocationPosts ignores an explicit tag option', async () => {
+      const spy = mockFetch({ data: { postsByLocation: { records: [] } } });
+      await client.fetchLocationPosts(16808, { tag: 'all' });
+      expect(spy.mock.calls[0][0] as string).not.toContain('tag=');
+    });
+
+    it('fetchLocationBulkPosts still sends tag=all and reads rollupSocialPosts', async () => {
+      const spy = mockFetch({
+        data: { rollupSocialPosts: { records: [{ id: 'b1' }] } },
+      });
+      const result = await client.fetchLocationBulkPosts(16808);
+      expect(result.records[0].id).toBe('b1');
+      const url = spy.mock.calls[0][0] as string;
+      expect(url).toContain('/locations/TG9jYXRpb246MTY4MDg=/bulk-posts');
+      expect(url).toContain('tag=all');
     });
 
     it('deletePost issues DELETE and unwraps the payload', async () => {

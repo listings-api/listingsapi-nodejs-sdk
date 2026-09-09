@@ -431,3 +431,229 @@ describe('payload-level error handling', () => {
     expect(caught.retryAfter).toBe(7);
   });
 });
+
+
+describe('error body parsing', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockError(status: number, bodyText: string, retryAfter: string | null = null) {
+    return vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status,
+      headers: { get: (h: string) => (h === 'Retry-After' ? retryAfter : null) },
+      text: async () => bodyText,
+    } as unknown as Response);
+  }
+
+  it('parses the top-level errors[] shape on a 4xx', async () => {
+    const body = JSON.stringify({
+      errors: [
+        { code: 'SY10005', message: 'name is required', context: { field: 'name' } },
+        { code: 'SY10006', message: 'city is required' },
+      ],
+    });
+    mockError(400, body);
+    const client = new ListingsAPI({ apiKey: 'test-key' });
+    let caught: any;
+    try {
+      await client.apiPost('locations', { input: {} });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ValidationError);
+    expect(caught.code).toBe('SY10005');
+    expect(caught.errors).toHaveLength(2);
+    expect(caught.errors[0].context).toEqual({ field: 'name' });
+    expect(caught.errors[1].message).toBe('city is required');
+    expect(caught.responseBody).toBe(body);
+    expect(caught.message).toContain('SY10005: name is required');
+  });
+
+  it('parses the singular error{} shape the gateway uses for 429', async () => {
+    const body = JSON.stringify({
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Request exceeded the minute limit. Retry after 3s.',
+        retry_after_seconds: 3,
+        limiting_window: 'minute',
+      },
+    });
+    mockError(429, body, '3');
+    const client = new ListingsAPI({ apiKey: 'test-key', maxRetries: 0 });
+    let caught: any;
+    try {
+      await client.apiGet('plan-sites');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RateLimitError);
+    expect(caught.code).toBe('RATE_LIMITED');
+    expect(caught.retryAfter).toBe(3);
+    expect(caught.responseBody).toBe(body);
+  });
+
+  it('parses the singular error{} shape on a 4xx', async () => {
+    const body = JSON.stringify({
+      error: { code: 'unknown_sub_category', message: 'No matching subcategory' },
+    });
+    mockError(422, body);
+    const client = new ListingsAPI({ apiKey: 'test-key' });
+    let caught: any;
+    try {
+      await client.apiPost('locations', { input: {} });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught.code).toBe('unknown_sub_category');
+    expect(caught.errors[0].message).toBe('No matching subcategory');
+    expect(caught.responseBody).toBe(body);
+  });
+
+  it('parses a bare {message, code} body on a 401', async () => {
+    const body = JSON.stringify({ message: 'SY90005: Invalid Token' });
+    mockError(401, body);
+    const client = new ListingsAPI({ apiKey: 'bad-key' });
+    let caught: any;
+    try {
+      await client.apiGet('plan-sites');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AuthenticationError);
+    expect(caught.code).toBe('SY90005');
+    expect(caught.errors[0].message).toBe('Invalid Token');
+    expect(caught.responseBody).toBe(body);
+  });
+
+  it('yields no entries but keeps the raw body for a non-JSON error', async () => {
+    mockError(404, '404 Not Found');
+    const client = new ListingsAPI({ apiKey: 'test-key' });
+    let caught: any;
+    try {
+      await client.apiGet('nope');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught.errors).toEqual([]);
+    expect(caught.code).toBeNull();
+    expect(caught.responseBody).toBe('404 Not Found');
+  });
+
+  it('attaches the raw body when a top-level errors[] arrives on HTTP 200', async () => {
+    const body = JSON.stringify({
+      data: null,
+      errors: [{ message: 'SY90005: Invalid Token' }],
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => body,
+    } as unknown as Response);
+    const client = new ListingsAPI({ apiKey: 'bad-key' });
+    let caught: any;
+    try {
+      await client.apiGet('plan-sites');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AuthenticationError);
+    expect(caught.code).toBe('SY90005');
+    // the raw body, not a re-serialized {errors: [...]}
+    expect(caught.responseBody).toBe(body);
+  });
+
+  it('attaches the raw body when a mutation reports success=false', async () => {
+    const body = JSON.stringify({
+      data: {
+        createSocialPost: {
+          success: false,
+          errors: [{ code: 'SY20001', message: 'Image URL unreachable' }],
+        },
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => body,
+    } as unknown as Response);
+    const client = new ListingsAPI({ apiKey: 'test-key' });
+    let caught: any;
+    try {
+      await client.bulkPublish({ name: 'x', locationIds: [1], message: 'hi' });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ValidationError);
+    expect(caught.code).toBe('SY20001');
+    expect(caught.responseBody).toBe(body);
+    expect(caught.statusCode).toBe(200);
+  });
+});
+
+describe('retry policy', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Retry-After keeps the backoff sub-millisecond so the suite stays fast.
+  const serverError = {
+    ok: false,
+    status: 500,
+    headers: { get: (h: string) => (h === 'Retry-After' ? '0.001' : null) },
+    text: async () => 'boom',
+  } as unknown as Response;
+
+  it('does not retry a POST on a 5xx', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(serverError);
+    const client = new ListingsAPI({ apiKey: 'test-key', maxRetries: 3 });
+    await expect(client.apiPost('locations', { input: {} })).rejects.toThrow(APIError);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a DELETE on a 5xx', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(serverError);
+    const client = new ListingsAPI({ apiKey: 'test-key', maxRetries: 3 });
+    await expect(client.apiDelete('posts/abc')).rejects.toThrow(APIError);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a POST on a network error', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('socket hang up'));
+    const client = new ListingsAPI({ apiKey: 'test-key', maxRetries: 3 });
+    await expect(client.apiPost('locations', { input: {} })).rejects.toThrow(
+      /Could not reach the API/,
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a GET on a 5xx up to maxRetries', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(serverError);
+    const client = new ListingsAPI({ apiKey: 'test-key', maxRetries: 2 });
+    await expect(client.apiGet('plan-sites')).rejects.toThrow(APIError);
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries a GET on a network error', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('socket hang up'));
+    const client = new ListingsAPI({ apiKey: 'test-key', maxRetries: 2 });
+    await expect(client.apiGet('plan-sites')).rejects.toThrow(
+      /Could not reach the API/,
+    );
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('maxRetries stays honoured for reads', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(serverError);
+    const client = new ListingsAPI({ apiKey: 'test-key', maxRetries: 0 });
+    await expect(client.apiGet('plan-sites')).rejects.toThrow(APIError);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});

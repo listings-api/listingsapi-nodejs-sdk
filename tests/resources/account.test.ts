@@ -88,7 +88,8 @@ describe('fetchSubcategories', () => {
       status: 200,
       headers: { get: () => null },
       json: async () => ({ data: { subcategories: [{ databaseId: 639, name: 'Dentist' }] } }),
-      text: async () => '{}',
+      text: async () =>
+        JSON.stringify({ data: { subcategories: [{ databaseId: 639, name: 'Dentist' }] } }),
     } as unknown as Response);
     const subs = await client.fetchSubcategories();
     expect(subs[0].databaseId).toBe(639);

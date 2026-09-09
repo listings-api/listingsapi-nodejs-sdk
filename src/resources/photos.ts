@@ -54,7 +54,7 @@ export function createPhotoMethods(http: HttpCore) {
       const data = await http.apiPost('locations/photos/star', {
         input: {
           locationId: http.encodeLocationId(locationId),
-          mediaIds,
+          photoIds: mediaIds,
           starred,
         },
       });

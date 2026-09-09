@@ -24,7 +24,7 @@ describe('Connections', () => {
   describe('getOauthConnectUrl', () => {
     it('should get oauth connect URL with encoded location ID', async () => {
       const mockResult = { url: 'https://connect.example.com' };
-      const spy = mockFetch({ data: { connectUrl: mockResult } });
+      const spy = mockFetch({ data: { createConnectUrl: mockResult } });
 
       const result = await client.getOauthConnectUrl(
         16808, 'GOOGLE', 'https://ok.com', 'https://err.com',

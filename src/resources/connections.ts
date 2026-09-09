@@ -24,7 +24,7 @@ export function createConnectionMethods(http: HttpCore) {
           errorUrl,
         },
       });
-      return (data as any)?.data?.connectUrl ?? {};
+      return (data as any)?.data?.createConnectUrl ?? {};
     },
 
     /**

@@ -95,7 +95,8 @@ describe('Photos', () => {
       expect(url).toContain('/locations/photos/star');
       const body = JSON.parse((spy.mock.calls[0][1] as any).body);
       expect(body.input.locationId).toBe(btoa('Location:16808'));
-      expect(body.input.mediaIds).toEqual(mediaIds);
+      expect(body.input.photoIds).toEqual(mediaIds);
+      expect(body.input.mediaIds).toBeUndefined();
       expect(body.input.starred).toBe(true);
     });
 

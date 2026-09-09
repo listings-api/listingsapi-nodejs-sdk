@@ -83,8 +83,12 @@ function buildPostBody(http: HttpCore, options: BuildPostBodyOptions): Record<st
   return body;
 }
 
-function listParams(options: ListPostsOptions = {}): Record<string, any> {
-  const params: Record<string, any> = { tag: options.tag ?? 'all' };
+function listParams(
+  options: ListPostsOptions = {},
+  includeTag = true,
+): Record<string, any> {
+  const params: Record<string, any> = {};
+  if (includeTag) params.tag = options.tag ?? 'all';
   if (options.page != null) params.page = options.page;
   if (options.perPage != null) params.perPage = options.perPage;
   if (options.filters != null) params.filters = JSON.stringify(options.filters);
@@ -95,11 +99,12 @@ function listParams(options: ListPostsOptions = {}): Record<string, any> {
 export function createPostMethods(http: HttpCore) {
   return {
     /**
-     * Create a post from a raw body (flat fields, not input-wrapped).
+     * Create a post from a raw field object. Pass the fields flat — they are
+     * wrapped in the `input` object the API requires before sending.
      * Prefer createAnnouncement / createEvent / createOffer for validation.
      */
     async createPost(body: Record<string, any>): Promise<any> {
-      const data = await http.apiPost('posts', body);
+      const data = await http.apiPost('posts', { input: body });
       return data?.data?.createSocialPost ?? {};
     },
 
@@ -119,7 +124,7 @@ export function createPostMethods(http: HttpCore) {
         scheduledDates: options.scheduledDates,
         additionalFields: options.additionalFields,
       });
-      const data = await http.apiPost('posts', body);
+      const data = await http.apiPost('posts', { input: body });
       return data?.data?.createSocialPost ?? {};
     },
 
@@ -151,7 +156,7 @@ export function createPostMethods(http: HttpCore) {
         contextInfo,
         additionalFields: options.additionalFields,
       });
-      const data = await http.apiPost('posts', body);
+      const data = await http.apiPost('posts', { input: body });
       return data?.data?.createSocialPost ?? {};
     },
 
@@ -182,7 +187,7 @@ export function createPostMethods(http: HttpCore) {
         contextInfo,
         additionalFields: options.additionalFields,
       });
-      const data = await http.apiPost('posts', body);
+      const data = await http.apiPost('posts', { input: body });
       return data?.data?.createSocialPost ?? {};
     },
 
@@ -215,8 +220,8 @@ export function createPostMethods(http: HttpCore) {
         contextInfo: options.contextInfo,
         additionalFields: options.additionalFields,
       });
-      const data = await http.apiPost('bulk-posts', body);
-      return data?.data?.createBulkSocialPost ?? {};
+      const data = await http.apiPost('bulk-posts', { input: body });
+      return data?.data?.createSocialPost ?? {};
     },
 
     /**
@@ -237,15 +242,22 @@ export function createPostMethods(http: HttpCore) {
     },
 
     /**
-     * List post campaigns targeting a location. Offset-paginated; tag defaults
-     * to "all" (the API errors when it is omitted).
+     * List post campaigns targeting a location. Offset-paginated.
+     *
+     * This route rejects a tag — the API errors when one is sent — so
+     * `options.tag` is accepted for backwards compatibility and never put on
+     * the wire. Use fetchLocationBulkPosts when you need tag filtering.
      */
     async fetchLocationPosts(
       locationId: string | number,
       options: ListPostsOptions = {},
     ): Promise<any> {
-      const data = await http.listingsGet(locationId, 'posts', listParams(options));
-      return data?.data?.rollupSocialPosts ?? {};
+      const data = await http.listingsGet(
+        locationId,
+        'posts',
+        listParams(options, false),
+      );
+      return data?.data?.postsByLocation ?? {};
     },
 
     /**

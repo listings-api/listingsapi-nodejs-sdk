@@ -88,8 +88,23 @@ export class RateLimitError extends APIError {
 /** 5xx — server-side error, safe to retry. */
 export class InternalServerError extends APIError {}
 
-/** Network failure — nothing reached the API. */
+/** Network failure or timeout. The outcome is unknown: a timed-out write may still have been applied, so read back before repeating it. */
 export class APIConnectionError extends ListingsAPIError {}
+
+const CODE_PREFIX_RE = /^\s*(SY\d+)\s*:\s*([\s\S]*)$/;
+
+/**
+ * Split a leading `SYxxxxx:` error code out of a message.
+ *
+ * The platform embeds error codes as a message prefix ("SY90005: Invalid
+ * Token") rather than as a separate field. Returns the code plus the message
+ * with the prefix stripped, or `[null, message]` when there is no prefix.
+ */
+function splitCodePrefix(message: string): [string | null, string] {
+  const match = message.match(CODE_PREFIX_RE);
+  if (match) return [match[1], match[2].trim()];
+  return [null, message];
+}
 
 export function parseErrorEntries(raw: unknown): ApiErrorEntry[] {
   if (!raw) return [];
@@ -97,12 +112,17 @@ export function parseErrorEntries(raw: unknown): ApiErrorEntry[] {
   return list.map((item) => {
     if (item && typeof item === 'object') {
       const o = item as Record<string, unknown>;
+      let code = typeof o.code === 'string' && o.code ? o.code : null;
+      let message =
+        typeof o.message === 'string' ? o.message : JSON.stringify(item);
+      if (!code) [code, message] = splitCodePrefix(message);
       return {
-        code: typeof o.code === 'string' ? o.code : null,
-        message: typeof o.message === 'string' ? o.message : JSON.stringify(item),
+        code,
+        message,
         context: (o.context as Record<string, unknown>) ?? {},
       };
     }
-    return { code: null, message: String(item), context: {} };
+    const [code, message] = splitCodePrefix(String(item));
+    return { code, message, context: {} };
   });
 }

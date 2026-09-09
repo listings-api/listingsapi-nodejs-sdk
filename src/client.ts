@@ -24,6 +24,13 @@ const DEFAULT_BASE_URL = 'https://listingsapi.com';
 const DEFAULT_TIMEOUT_MS = 240_000;
 const DEFAULT_MAX_RETRIES = 2;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+/**
+ * Only these methods are retried. The API has no Idempotency-Key support, so a
+ * retried write could duplicate a post or a location; writes are sent once and
+ * any 429/5xx surfaces immediately. Mirrors the Python SDK's urllib3
+ * `allowed_methods`.
+ */
+const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const AUTH_ERROR_CODES = new Set(['SY90005', 'SY90001']);
 const PERMISSION_ERROR_CODES = new Set(['SY90003']);
 
@@ -56,6 +63,70 @@ function buildQueryString(params: Record<string, any>): string {
   return `?${searchParams.toString()}`;
 }
 
+/**
+ * Read a response body once, returning both the raw text and the parsed JSON.
+ *
+ * The raw text is what gets attached to errors as `responseBody`, so callers
+ * see exactly what the API sent. A non-JSON body (the gateway returns plain
+ * text for some 404s) yields `parsed: null` rather than throwing.
+ */
+async function readResponseBody(
+  response: Response,
+): Promise<{ bodyText: string; parsed: unknown }> {
+  if (typeof (response as any).text === 'function') {
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch {
+      bodyText = '';
+    }
+    let parsed: unknown = null;
+    if (bodyText) {
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        parsed = null;
+      }
+    }
+    return { bodyText, parsed };
+  }
+  let parsed: unknown = null;
+  try {
+    parsed = await (response as any).json();
+  } catch {
+    parsed = null;
+  }
+  let bodyText = '';
+  try {
+    bodyText = parsed == null ? '' : JSON.stringify(parsed);
+  } catch {
+    bodyText = '';
+  }
+  return { bodyText, parsed };
+}
+
+/**
+ * Best-effort parse of error entries out of a response body.
+ *
+ * Handles the three shapes the platform uses: the `errors[]` envelope, the
+ * singular `{ error: { code, message, ... } }` object (429s and some 4xx), and
+ * a bare `{ message, code }` body. Anything else yields no entries. Mirrors
+ * the Python SDK's `_error_entries_from_response`.
+ */
+function errorEntriesFromBody(parsed: unknown): ApiErrorEntry[] {
+  if (!parsed || typeof parsed !== 'object') return [];
+  const body = parsed as Record<string, unknown>;
+  if (body.errors) return parseErrorEntries(body.errors);
+  if (body.error) {
+    if (typeof body.error === 'object') return parseErrorEntries([body.error]);
+    return parseErrorEntries([{ message: String(body.error) }]);
+  }
+  if (body.message) {
+    return parseErrorEntries([{ code: body.code, message: body.message }]);
+  }
+  return [];
+}
+
 export interface ListingsAPIOptions {
   /** API key. Defaults to the LISTINGSAPI_KEY environment variable. */
   apiKey?: string;
@@ -63,7 +134,13 @@ export interface ListingsAPIOptions {
   baseUrl?: string;
   /** Per-request timeout in milliseconds. Defaults to 240000. */
   timeout?: number;
-  /** Automatic retries on 429 and 5xx responses. Defaults to 2. */
+  /**
+   * Automatic retries on 429 and 5xx responses. Defaults to 2.
+   *
+   * Applies to reads only (GET/HEAD/OPTIONS). Writes are never retried
+   * automatically: the API has no idempotency keys, so a retried POST could
+   * duplicate a post or a location.
+   */
   maxRetries?: number;
 }
 
@@ -137,25 +214,25 @@ export class ListingsAPI {
     path: string,
     body: Record<string, any>,
   ): Promise<T> {
-    const data = await this.request<T>(
+    const { data, bodyText, status } = await this.requestRaw(
       'POST',
       `${this.baseUrl}/api/v4/${path}`,
       JSON.stringify(body),
     );
-    this.raiseForMutationErrors(data);
-    return data;
+    this.raiseForMutationErrors(data, bodyText, status);
+    return data as T;
   }
 
   /**
    * DELETE request to an account-level API endpoint.
    */
   async apiDelete<T = any>(path: string): Promise<T> {
-    const data = await this.request<T>(
+    const { data, bodyText, status } = await this.requestRaw(
       'DELETE',
       `${this.baseUrl}/api/v4/${path}`,
     );
-    this.raiseForMutationErrors(data);
-    return data;
+    this.raiseForMutationErrors(data, bodyText, status);
+    return data as T;
   }
 
   /**
@@ -175,9 +252,23 @@ export class ListingsAPI {
     url: string,
     body?: string,
   ): Promise<T> {
-    let lastError: Error | null = null;
+    const { data } = await this.requestRaw(method, url, body);
+    return data as T;
+  }
 
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+  private async requestRaw(
+    method: string,
+    url: string,
+    body?: string,
+  ): Promise<{ data: unknown; bodyText: string; status: number }> {
+    let lastError: Error | null = null;
+    // Reads may be repeated safely; writes are sent exactly once because the
+    // API cannot dedupe a retried create.
+    const maxRetries = IDEMPOTENT_METHODS.has(method.toUpperCase())
+      ? this.maxRetries
+      : 0;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       let response: Response;
       try {
         response = await fetch(url, {
@@ -190,11 +281,11 @@ export class ListingsAPI {
         lastError = new APIConnectionError(
           `Could not reach the API: ${err instanceof Error ? err.message : String(err)}`,
         );
-        if (attempt < this.maxRetries) continue;
+        if (attempt < maxRetries) continue;
         throw lastError;
       }
 
-      if (RETRYABLE_STATUSES.has(response.status) && attempt < this.maxRetries) {
+      if (RETRYABLE_STATUSES.has(response.status) && attempt < maxRetries) {
         const retryAfter = Number(response.headers?.get?.('Retry-After'));
         const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
           ? retryAfter * 1000
@@ -203,26 +294,31 @@ export class ListingsAPI {
         continue;
       }
 
+      const { bodyText, parsed } = await readResponseBody(response);
+
       if (!response.ok) {
-        throw await this.errorForResponse(response);
+        throw this.errorForResponse(response, bodyText, parsed);
       }
 
-      const data = (await response.json()) as T;
-      const topLevel = parseErrorEntries((data as any)?.errors);
+      const topLevel = parseErrorEntries((parsed as any)?.errors);
       if (topLevel.length > 0) {
-        throw this.errorForEntries(topLevel, response.status);
+        throw this.errorForEntries(topLevel, response.status, bodyText);
       }
-      return data;
+      return { data: parsed, bodyText, status: response.status };
     }
 
     throw lastError ?? new APIConnectionError('Request failed');
   }
 
-  private async errorForResponse(response: Response): Promise<APIError> {
-    const bodyText = await response.text();
+  private errorForResponse(
+    response: Response,
+    bodyText: string,
+    parsed: unknown,
+  ): APIError {
     const status = response.status;
     const message = `API request failed: ${status}`;
-    const options = { statusCode: status, responseBody: bodyText };
+    const errors = errorEntriesFromBody(parsed);
+    const options = { statusCode: status, responseBody: bodyText, errors };
 
     if (status === 401) return new AuthenticationError(message, options);
     if (status === 403) return new PermissionDeniedError(message, options);
@@ -238,11 +334,15 @@ export class ListingsAPI {
     return new APIError(message, options);
   }
 
-  private errorForEntries(entries: ApiErrorEntry[], statusCode: number): APIError {
+  private errorForEntries(
+    entries: ApiErrorEntry[],
+    statusCode: number,
+    responseBody: string,
+  ): APIError {
     const codes = new Set(entries.map((e) => e.code).filter(Boolean) as string[]);
     const options = {
       statusCode,
-      responseBody: JSON.stringify({ errors: entries }),
+      responseBody,
       errors: entries,
     };
     for (const code of codes) {
@@ -257,7 +357,11 @@ export class ListingsAPI {
     return new APIError('API request failed', options);
   }
 
-  private raiseForMutationErrors(data: unknown): void {
+  private raiseForMutationErrors(
+    data: unknown,
+    responseBody: string,
+    statusCode: number,
+  ): void {
     if (!data || typeof data !== 'object') return;
     const payload = (data as Record<string, any>).data;
     if (!payload || typeof payload !== 'object') return;
@@ -267,7 +371,8 @@ export class ListingsAPI {
       const errors = parseErrorEntries(entry.errors);
       if (errors.length > 0 || entry.success === false) {
         throw new ValidationError('API request failed', {
-          statusCode: 200,
+          statusCode,
+          responseBody,
           errors: errors.length > 0
             ? errors
             : [{ code: null, message: 'The API reported success=false', context: {} }],
