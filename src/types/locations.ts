@@ -20,9 +20,12 @@ export interface CreateLocationInput {
   name: string;
   storeId: string;
   street: string;
-  city: string;
-  stateIso: string;
-  postalCode: string;
+  /** Required unless the country's `hasCity` is false. */
+  city?: string;
+  /** Required when the country's `stateRequired` is true. */
+  stateIso?: string;
+  /** Send when the country's `hasPostalCode` is true. */
+  postalCode?: string;
   countryIso: string;
   phone: string;
   subCategoryId: number;

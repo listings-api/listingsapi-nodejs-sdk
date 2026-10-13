@@ -17,7 +17,9 @@ export function createAccountMethods(http: HttpCore) {
     },
 
     /**
-     * Get supported countries and states.
+     * Get supported countries and states. Each country carries `hasCity`,
+     * `stateRequired` and `hasPostalCode`, which tell you which address
+     * fields a location in that country needs.
      */
     async fetchCountries(): Promise<Country[]> {
       const data = await http.apiGet('countries');

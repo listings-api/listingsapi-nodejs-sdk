@@ -254,7 +254,7 @@ await client.oauthDisconnect(16808, 'FACEBOOK');
 
 ```ts
 const sites = await client.fetchPlanSites();       // directories included in your plan
-const countries = await client.fetchCountries();   // supported countries and states
+const countries = await client.fetchCountries();   // supported countries, states, and address rules
 const subs = await client.fetchSubscriptions();    // active subscriptions
 const cats = await client.fetchSubcategories();    // category IDs for createLocation
 ```
@@ -266,7 +266,7 @@ const cats = await client.fetchSubcategories();    // category IDs for createLoc
 | Method | Description |
 |--------|-------------|
 | `fetchPlanSites()` | Directories included in your plan |
-| `fetchCountries()` | Supported countries and states (ISO codes) |
+| `fetchCountries()` | Supported countries and states (ISO codes), with `hasCity`, `stateRequired` and `hasPostalCode` for each country |
 | `fetchSubscriptions()` | Active subscriptions for the account |
 | `fetchSubcategories()` | Business categories (IDs for createLocation) |
 

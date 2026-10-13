@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.3
+
+### Added
+
+- **`Country` is typed.** `fetchCountries()` now returns `id`, `databaseId`,
+  `iso`, `name`, `states`, and three address rules for each country:
+  `hasCity`, `stateRequired` and `hasPostalCode`. Use them to decide which
+  address fields a location needs before you call `createLocation`.
+
+### Changed
+
+- **`CreateLocationInput` no longer requires `city`, `stateIso` or
+  `postalCode`.** Countries without states (such as Egypt) or without postal
+  codes (such as the United Arab Emirates) could not be typed correctly.
+  Send `stateIso` when the country's `stateRequired` is true, `postalCode`
+  when `hasPostalCode` is true, and `city` unless `hasCity` is false.
+
 ## 0.3.2
 
 Fixes for request bodies, response keys, error reporting, and the retry policy.
